@@ -1,0 +1,28 @@
+import numpy as np
+import rasterio
+import glob
+
+# Define input and output paths
+input_folder = "path/to/your/folder/"
+output_mosaic = "output_mosaic.tif"
+
+# List the .bil files
+bil_files = glob.glob(input_folder + "*.bil")
+
+# Initialize variables for the mosaic
+chunks = []
+width, height = 0, 0
+
+# Read and process each file in chunks
+for file in bil_files:
+    with rasterio.open(file) as src:
+        # Read the data in chunks
+        for chunk in src.read(1, out_shape=(1, height, width), windowed=True):
+            chunks.append(chunk)
+
+# Combine the chunks
+mosaic = np.concatenate(chunks, axis=0)
+
+# Save the mosaic to disk
+with rasterio.open(output_mosaic, 'w', driver='GTiff', height=mosaic.shape[1], width=mosaic.shape[2], count=1, dtype=mosaic.dtype) as dst:
+    dst.write(mosaic, 1)
