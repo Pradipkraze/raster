@@ -1,8 +1,8 @@
 import rasterio
 import glob
 import os
-from rasterio.merge import merge
 from rasterio.enums import Resampling
+from rasterio.vrt import WarpedVRT
 
 # Set paths
 input_folder = "path_to_your_folder"
@@ -11,31 +11,29 @@ output_mosaic = "mosaic.tif"
 # Get all .bil raster files
 raster_files = glob.glob(os.path.join(input_folder, "*.bil"))
 
-# Open files in read mode
-src_files = [rasterio.open(f) for f in raster_files]
+# Open first raster to get metadata
+with rasterio.open(raster_files[0]) as src:
+    meta = src.meta.copy()
+    profile = src.profile.copy()
 
-# Merge rasters in a memory-efficient way
-mosaic, out_transform = merge(src_files, method="min", resampling=Resampling.nearest)
-
-# Update metadata
-out_meta = src_files[0].meta.copy()
-out_meta.update({
+# Update metadata for output
+meta.update({
     "driver": "GTiff",
-    "height": mosaic.shape[1],
-    "width": mosaic.shape[2],
-    "transform": out_transform,
-    "compress": "lzw",  # Compression to reduce file size
-    "tiled": True,       # Tiled format helps with efficiency
-    "bigtiff": "YES"     # Handles large files
+    "compress": "lzw",
+    "tiled": True,  
+    "bigtiff": "YES",  # Allows handling large files
+    "blockxsize": 256,  # Small tile size for memory efficiency
+    "blockysize": 256
 })
 
-# Write the output mosaic in chunks (windowed writing)
-with rasterio.open(output_mosaic, "w", **out_meta) as dest:
-    for ji, window in dest.block_windows(1):
-        dest.write(mosaic[:, window.row_off:window.row_off+window.height, window.col_off:window.col_off+window.width], window=window)
-
-# Close all source files
-for src in src_files:
-    src.close()
+# Open destination file for writing
+with rasterio.open(output_mosaic, "w", **meta) as dst:
+    for file in raster_files:
+        with rasterio.open(file) as src:
+            # Warp raster on the fly to match output mosaic grid
+            with WarpedVRT(src, resampling=Resampling.nearest) as vrt:
+                for ji, window in dst.block_windows(1):
+                    data = vrt.read(window=window)
+                    dst.write(data, window=window)  # Write in small chunks
 
 print(f"Mosaic created successfully: {output_mosaic}")
