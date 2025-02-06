@@ -1,28 +1,37 @@
-import numpy as np
 import rasterio
+from rasterio.merge import merge
+from rasterio.plot import show
 import glob
+import os
 
-# Define input and output paths
-input_folder = "path/to/your/folder/"
-output_mosaic = "output_mosaic.tif"
+# Set your input folder and output mosaic file
+input_folder = "path_to_your_folder"
+output_mosaic = "mosaic.tif"
 
-# List the .bil files
-bil_files = glob.glob(input_folder + "*.bil")
+# Get all .bil raster files
+raster_files = glob.glob(os.path.join(input_folder, "*.bil"))
 
-# Initialize variables for the mosaic
-chunks = []
-width, height = 0, 0
+# Open files using rasterio and keep them in memory-efficient mode
+src_files_to_mosaic = [rasterio.open(raster) for raster in raster_files]
 
-# Read and process each file in chunks
-for file in bil_files:
-    with rasterio.open(file) as src:
-        # Read the data in chunks
-        for chunk in src.read(1, out_shape=(1, height, width), windowed=True):
-            chunks.append(chunk)
+# Merge rasters
+mosaic, out_transform = merge(src_files_to_mosaic)
 
-# Combine the chunks
-mosaic = np.concatenate(chunks, axis=0)
+# Get metadata from one of the source files
+out_meta = src_files_to_mosaic[0].meta.copy()
+out_meta.update({
+    "driver": "GTiff",
+    "height": mosaic.shape[1],
+    "width": mosaic.shape[2],
+    "transform": out_transform
+})
 
-# Save the mosaic to disk
-with rasterio.open(output_mosaic, 'w', driver='GTiff', height=mosaic.shape[1], width=mosaic.shape[2], count=1, dtype=mosaic.dtype) as dst:
-    dst.write(mosaic, 1)
+# Write output file
+with rasterio.open(output_mosaic, "w", **out_meta) as dest:
+    dest.write(mosaic)
+
+# Close all source files
+for src in src_files_to_mosaic:
+    src.close()
+
+print(f"Mosaic created: {output_mosaic}")
