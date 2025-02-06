@@ -1,37 +1,41 @@
 import rasterio
-from rasterio.merge import merge
-from rasterio.plot import show
 import glob
 import os
+from rasterio.merge import merge
+from rasterio.enums import Resampling
 
-# Set your input folder and output mosaic file
+# Set paths
 input_folder = "path_to_your_folder"
 output_mosaic = "mosaic.tif"
 
 # Get all .bil raster files
 raster_files = glob.glob(os.path.join(input_folder, "*.bil"))
 
-# Open files using rasterio and keep them in memory-efficient mode
-src_files_to_mosaic = [rasterio.open(raster) for raster in raster_files]
+# Open files in read mode
+src_files = [rasterio.open(f) for f in raster_files]
 
-# Merge rasters
-mosaic, out_transform = merge(src_files_to_mosaic)
+# Merge rasters in a memory-efficient way
+mosaic, out_transform = merge(src_files, method="min", resampling=Resampling.nearest)
 
-# Get metadata from one of the source files
-out_meta = src_files_to_mosaic[0].meta.copy()
+# Update metadata
+out_meta = src_files[0].meta.copy()
 out_meta.update({
     "driver": "GTiff",
     "height": mosaic.shape[1],
     "width": mosaic.shape[2],
-    "transform": out_transform
+    "transform": out_transform,
+    "compress": "lzw",  # Compression to reduce file size
+    "tiled": True,       # Tiled format helps with efficiency
+    "bigtiff": "YES"     # Handles large files
 })
 
-# Write output file
+# Write the output mosaic in chunks (windowed writing)
 with rasterio.open(output_mosaic, "w", **out_meta) as dest:
-    dest.write(mosaic)
+    for ji, window in dest.block_windows(1):
+        dest.write(mosaic[:, window.row_off:window.row_off+window.height, window.col_off:window.col_off+window.width], window=window)
 
 # Close all source files
-for src in src_files_to_mosaic:
+for src in src_files:
     src.close()
 
-print(f"Mosaic created: {output_mosaic}")
+print(f"Mosaic created successfully: {output_mosaic}")
