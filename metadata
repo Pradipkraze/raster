@@ -1,0 +1,74 @@
+import pandas as pd
+import rasterio
+from rasterio.features import shapes
+from shapely.geometry import Polygon
+import numpy as np
+
+# Define the root directory
+root_dir = '/Users/hp/Desktop/aloo'
+
+# Initialize lists to store directory information
+dir_paths = []
+dir_names = []
+parent_dirs = []
+
+# Walk through the directory tree
+for root, dirs, files in os.walk(root_dir):
+    if not dirs:  # Check if the directory has no subdirectories
+        dir_paths.append(root)
+        dir_names.append(os.path.basename(root))
+        parent_dirs.append(os.path.basename(os.path.dirname(root)))
+
+# Create a pandas DataFrame
+df = pd.DataFrame({
+    'Directory_Path': dir_paths,
+    'Directory_Name': dir_names,
+    'Parent_Directory': parent_dirs
+})
+
+# Print the DataFrame
+print(df)
+
+
+
+
+
+
+df['pixel_size'] = None
+df['raster_boundary'] = None
+
+# iterate over each row in the dataframe
+for index, row in df.iterrows():
+    folder_path = row['folder_path']
+    
+    # find all .tif files in the folder
+    tif_files = [f for f in os.listdir(folder_path) if f.endswith('.tif')]
+    
+    # iterate over each .tif file
+    for tif_file in tif_files:
+        file_path = os.path.join(folder_path, tif_file)
+        
+        # open the geotiff file using rasterio
+        with rasterio.open(file_path) as src:
+            # extract the pixel size
+            pixel_size = src.transform[0]
+            
+            # store the pixel size in the dataframe
+            df.at[index, 'pixel_size'] = pixel_size
+            
+            # read the raster data
+            raster_data = src.read(1)
+            
+            # mask out no data values
+            masked_data = np.ma.masked_equal(raster_data, src.nodata)
+            
+            # get the raster boundary
+            boundary = shapes(masked_data, mask=masked_data.mask, transform=src.transform)[0][0]
+            polygon = Polygon(boundary['coordinates'][0])
+            wkt_polygon = polygon.wkt
+            
+            # store the raster boundary in the dataframe
+            df.at[index, 'raster_boundary'] = wkt_polygon
+
+# print the updated dataframe
+print(df)
