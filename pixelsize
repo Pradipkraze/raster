@@ -1,0 +1,42 @@
+import geopandas as gpd
+import pandas as pd
+import numpy as np
+from osgeo import ogr, osr, gdal
+import os
+
+# Define the root directory
+root_dir = '/Users/desktop/test'
+
+
+tif_files = []
+
+for root, dirs, files in os.walk(root_dir):
+    for file in files:
+        if file.endswith('.tif'):
+            tif_files.append(root+'/'+file)
+            break
+
+# Remove duplicates by converting to set and back to list
+tif_files = list((tif_files))
+
+# Create a pandas DataFrame
+df = pd.DataFrame(tif_files, columns=['tif_files'])
+
+df['tif_files'] = df['tif_files'].str.replace('\\', '/')
+
+display(df)
+
+def get_pixel_size(file_path):
+    try:
+        info = gdal.Info(file_path)
+        for line in info.split('\n'):
+            if 'Pixel Size' in line:
+                pixel_size = line.split('=')[1].strip()
+                return pixel_size
+    except Exception as e:
+        print(f"Error reading file {file_path}: {e}")
+        return None
+
+df['pixel_size'] = df['tif_files'].apply(get_pixel_size)
+
+print(df)
