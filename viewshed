@@ -1,48 +1,57 @@
 import geopandas as gpd
-import whitebox
-from shapely.geometry import Point
-import rasterio
+from shapely.geometry import Point, Polygon, LineString
+import numpy as np
 
-# Initialize WhiteboxTools
-wbt = whitebox.WhiteboxTools()
+# Load building polygon
+building_gdf = gpd.read_file("building_polygon.geojson")
 
-# Paths
-dem_path = "path/to/dem.tif"        # Input DEM
-building_polygon = "path/to/polygon.geojson"  # Polygon (Building footprint)
-viewshed_output = "path/to/viewshed.tif"  # Output Viewshed Raster
+# Define building and tower height
+building_height = 100
+tower_height = 110
 
-# Load the building polygon
-building = gpd.read_file(building_polygon)
+# Step 1: Generate a buffer around the building at 750m
+buffer_gdf = building_gdf.buffer(750)
 
-# Calculate a point 750m away from the perimeter (Example: Using centroid & buffer)
-building_centroid = building.geometry.centroid[0]
-observer_location = building_centroid.buffer(750).exterior.coords[0]  # First point on buffer
+# Step 2: Generate sightlines
+tower_location = building_gdf.centroid.iloc[0]  # Assume tower at centroid
 
-# Observer coordinates
-observer_x, observer_y = observer_location
+num_rays = 360  # Define the number of sightlines (one per degree)
+rays = []
 
-# Observer & Target Heights
-observer_height = 1.5   # Human eye level
-target_height = 110     # Building + Tower
+for angle in np.linspace(0, 360, num_rays):
+    # Generate a point on the buffer at a given angle
+    x = tower_location.x + 750 * np.cos(np.radians(angle))
+    y = tower_location.y + 750 * np.sin(np.radians(angle))
+    
+    sightline = LineString([tower_location, (x, y)])
+    rays.append(sightline)
 
-# Run Viewshed Analysis
-wbt.viewshed(dem_path, viewshed_output, observer_x, observer_y, observer_height, target_height)
+# Convert rays to GeoDataFrame
+rays_gdf = gpd.GeoDataFrame(geometry=rays, crs=building_gdf.crs)
 
-print("✅ Viewshed analysis complete! Check the output raster.")
+# Step 3: Find obstructed rays (those that intersect the building)
+obstructed_rays = rays_gdf[rays_gdf.intersects(building_gdf.unary_union)]
 
-# Load viewshed result & polygon
-with rasterio.open(viewshed_output) as src:
-    viewshed_data = src.read(1)  # Read raster data
-    viewshed_meta = src.meta  # Get metadata
+# Step 4: Compute the visible area
+visible_area = buffer_gdf.difference(obstructed_rays.unary_union)
 
-# Load viewshed into GeoDataFrame and clip it to the building polygon (non-visible areas)
-viewshed_gdf = gpd.read_file(viewshed_output)
-non_visible_areas = viewshed_gdf[viewshed_gdf['value'] == 0]  # 0 = not visible
+# Step 5: Compute the non-visible area
+non_visible_area = buffer_gdf.difference(visible_area)
 
-# Clip non-visible areas within the polygon
-non_visible_areas = gpd.clip(non_visible_areas, building)
+# Save results
+visible_area_gdf = gpd.GeoDataFrame(geometry=[visible_area], crs=building_gdf.crs)
+non_visible_area_gdf = gpd.GeoDataFrame(geometry=[non_visible_area], crs=building_gdf.crs)
 
-# Save output as a new GeoJSON
-non_visible_areas.to_file("path/to/non_visible_areas.geojson", driver="GeoJSON")
+visible_area_gdf.to_file("visible_area.geojson", driver="GeoJSON")
+non_visible_area_gdf.to_file("non_visible_area.geojson", driver="GeoJSON")
 
-print("✅ Non-visible areas inside the polygon saved!")
+# Optional: Plot results
+import matplotlib.pyplot as plt
+fig, ax = plt.subplots()
+buffer_gdf.plot(ax=ax, color='lightgrey', edgecolor='black', alpha=0.5)
+building_gdf.plot(ax=ax, color='black', edgecolor='black')
+rays_gdf.plot(ax=ax, color='blue', alpha=0.3)
+obstructed_rays.plot(ax=ax, color='red', alpha=0.8)
+non_visible_area_gdf.plot(ax=ax, color='green', alpha=0.5)
+
+plt.show()
