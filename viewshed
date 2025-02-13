@@ -1,57 +1,58 @@
 import geopandas as gpd
-from shapely.geometry import Point, Polygon, LineString
+from shapely.geometry import Point, Polygon
 import numpy as np
-
-# Load building polygon
-building_gdf = gpd.read_file("building_polygon.geojson")
-
-# Define building and tower height
-building_height = 100
-tower_height = 110
-
-# Step 1: Generate a buffer around the building at 750m
-buffer_gdf = building_gdf.buffer(750)
-
-# Step 2: Generate sightlines
-tower_location = building_gdf.centroid.iloc[0]  # Assume tower at centroid
-
-num_rays = 360  # Define the number of sightlines (one per degree)
-rays = []
-
-for angle in np.linspace(0, 360, num_rays):
-    # Generate a point on the buffer at a given angle
-    x = tower_location.x + 750 * np.cos(np.radians(angle))
-    y = tower_location.y + 750 * np.sin(np.radians(angle))
-    
-    sightline = LineString([tower_location, (x, y)])
-    rays.append(sightline)
-
-# Convert rays to GeoDataFrame
-rays_gdf = gpd.GeoDataFrame(geometry=rays, crs=building_gdf.crs)
-
-# Step 3: Find obstructed rays (those that intersect the building)
-obstructed_rays = rays_gdf[rays_gdf.intersects(building_gdf.unary_union)]
-
-# Step 4: Compute the visible area
-visible_area = buffer_gdf.difference(obstructed_rays.unary_union)
-
-# Step 5: Compute the non-visible area
-non_visible_area = buffer_gdf.difference(visible_area)
-
-# Save results
-visible_area_gdf = gpd.GeoDataFrame(geometry=[visible_area], crs=building_gdf.crs)
-non_visible_area_gdf = gpd.GeoDataFrame(geometry=[non_visible_area], crs=building_gdf.crs)
-
-visible_area_gdf.to_file("visible_area.geojson", driver="GeoJSON")
-non_visible_area_gdf.to_file("non_visible_area.geojson", driver="GeoJSON")
-
-# Optional: Plot results
 import matplotlib.pyplot as plt
-fig, ax = plt.subplots()
-buffer_gdf.plot(ax=ax, color='lightgrey', edgecolor='black', alpha=0.5)
-building_gdf.plot(ax=ax, color='black', edgecolor='black')
-rays_gdf.plot(ax=ax, color='blue', alpha=0.3)
-obstructed_rays.plot(ax=ax, color='red', alpha=0.8)
-non_visible_area_gdf.plot(ax=ax, color='green', alpha=0.5)
 
+# Load your building polygon (Assuming it's in a GeoDataFrame)
+buildings = gpd.read_file("buildings.shp")
+
+# Select the specific building polygon (assuming only one building)
+building = buildings.iloc[0].geometry
+
+# Define building height and tower height
+building_height = 100  # meters
+tower_height = 10  # meters
+total_height = building_height + tower_height  # 110 meters
+
+# Generate a buffer around the building (750m visibility test area)
+visibility_zone = building.buffer(750)
+
+# Create a grid of test points inside the buffer
+x_min, y_min, x_max, y_max = visibility_zone.bounds
+x_vals = np.linspace(x_min, x_max, 100)
+y_vals = np.linspace(y_min, y_max, 100)
+
+# Generate observation points
+observation_points = [Point(x, y) for x in x_vals for y in y_vals if visibility_zone.contains(Point(x, y))]
+
+# Function to check if the tower is visible from a given point
+def is_visible(observer, building, height_diff):
+    """
+    Checks if a tower on a building is visible from a given observer point.
+    """
+    obs_x, obs_y = observer.x, observer.y
+    building_x, building_y = building.centroid.x, building.centroid.y
+    
+    # Calculate distance
+    distance = np.sqrt((obs_x - building_x) ** 2 + (obs_y - building_y) ** 2)
+    
+    # Calculate the angle of elevation to the tower
+    angle_to_tower = np.arctan2(total_height, distance)  # in radians
+    
+    # If the angle is too small (obstructed by the building), it's not visible
+    return angle_to_tower > np.arctan2(building_height, distance)
+
+# Identify non-visible areas
+non_visible_points = [pt for pt in observation_points if not is_visible(pt, building, total_height - building_height)]
+
+# Convert non-visible points into a GeoDataFrame for visualization
+non_visible_gdf = gpd.GeoDataFrame(geometry=non_visible_points, crs=buildings.crs)
+
+# Plot the results
+fig, ax = plt.subplots(figsize=(8, 8))
+gpd.GeoSeries(visibility_zone).plot(ax=ax, edgecolor="blue", alpha=0.2, label="750m Buffer")
+gpd.GeoSeries(building).plot(ax=ax, color="gray", label="Building")
+non_visible_gdf.plot(ax=ax, color="red", markersize=5, label="Non-Visible Area")
+plt.legend()
+plt.title("Areas Where Tower is Not Visible")
 plt.show()
