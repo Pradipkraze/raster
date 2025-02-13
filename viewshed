@@ -1,0 +1,48 @@
+import geopandas as gpd
+import whitebox
+from shapely.geometry import Point
+import rasterio
+
+# Initialize WhiteboxTools
+wbt = whitebox.WhiteboxTools()
+
+# Paths
+dem_path = "path/to/dem.tif"        # Input DEM
+building_polygon = "path/to/polygon.geojson"  # Polygon (Building footprint)
+viewshed_output = "path/to/viewshed.tif"  # Output Viewshed Raster
+
+# Load the building polygon
+building = gpd.read_file(building_polygon)
+
+# Calculate a point 750m away from the perimeter (Example: Using centroid & buffer)
+building_centroid = building.geometry.centroid[0]
+observer_location = building_centroid.buffer(750).exterior.coords[0]  # First point on buffer
+
+# Observer coordinates
+observer_x, observer_y = observer_location
+
+# Observer & Target Heights
+observer_height = 1.5   # Human eye level
+target_height = 110     # Building + Tower
+
+# Run Viewshed Analysis
+wbt.viewshed(dem_path, viewshed_output, observer_x, observer_y, observer_height, target_height)
+
+print("✅ Viewshed analysis complete! Check the output raster.")
+
+# Load viewshed result & polygon
+with rasterio.open(viewshed_output) as src:
+    viewshed_data = src.read(1)  # Read raster data
+    viewshed_meta = src.meta  # Get metadata
+
+# Load viewshed into GeoDataFrame and clip it to the building polygon (non-visible areas)
+viewshed_gdf = gpd.read_file(viewshed_output)
+non_visible_areas = viewshed_gdf[viewshed_gdf['value'] == 0]  # 0 = not visible
+
+# Clip non-visible areas within the polygon
+non_visible_areas = gpd.clip(non_visible_areas, building)
+
+# Save output as a new GeoJSON
+non_visible_areas.to_file("path/to/non_visible_areas.geojson", driver="GeoJSON")
+
+print("✅ Non-visible areas inside the polygon saved!")
